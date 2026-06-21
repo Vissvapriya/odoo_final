@@ -1,0 +1,295 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  role         String     // 'ADMIN', 'OWNER', 'SALES', 'PURCHASE', 'MANUFACTURING', 'INVENTORY'
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  auditLogs    AuditLog[]
+
+  @@index([role])
+}
+
+model Product {
+  id              String                @id @default(uuid())
+  name            String
+  sku             String                @unique
+  description     String?
+  price           Float                 @default(0.0)
+  cost            Float                 @default(0.0)
+  onHandQty       Float                 @default(0.0)
+  reservedQty     Float                 @default(0.0)
+  availableQty    Float                 @default(0.0) // calculated or stored
+  thresholdQty    Float                 @default(20.0)
+  isFinishedGoods Boolean               @default(true)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  salesItems      SalesOrderItem[]
+  purchaseItems   PurchaseOrderItem[]
+  boms            BOM[]                 @relation("FinishedProduct")
+  bomItems        BOMItem[]             @relation("RawMaterial")
+  mfgOrders       ManufacturingOrder[]
+  stockLedgers    StockLedger[]
+  predictions     InventoryPrediction[]
+
+  @@index([name])
+  @@index([sku])
+}
+
+model Vendor {
+  id               String                 @id @default(uuid())
+  name             String
+  email            String
+  phone            String?
+  address          String?
+  priceScore       Float                  @default(0.0)
+  deliveryScore    Float                  @default(0.0)
+  qualityScore     Float                  @default(0.0)
+  reliabilityScore Float                  @default(0.0)
+  finalScore       Float                  @default(0.0)
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  purchaseOrders   PurchaseOrder[]
+  recommendations  VendorRecommendation[]
+
+  @@index([name])
+}
+
+model Customer {
+  id          String       @id @default(uuid())
+  name        String
+  email       String
+  phone       String?
+  address     String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  salesOrders SalesOrder[]
+
+  @@index([name])
+}
+
+model SalesOrder {
+  id          String           @id @default(uuid())
+  orderNumber String           @unique
+  customerId  String
+  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  status      String           @default("DRAFT") // 'DRAFT', 'CONFIRMED', 'PARTIAL_DELIVERY', 'DELIVERED', 'CANCELLED'
+  totalAmount Float            @default(0.0)
+  items       SalesOrderItem[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model SalesOrderItem {
+  id           String     @id @default(uuid())
+  salesOrderId String
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity     Float
+  price        Float
+  deliveredQty Float      @default(0.0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([productId])
+  @@index([salesOrderId])
+}
+
+model PurchaseOrder {
+  id              String                 @id @default(uuid())
+  orderNumber     String                 @unique
+  vendorId        String
+  vendor          Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  status          String                 @default("DRAFT") // 'DRAFT', 'CONFIRMED', 'PARTIAL_RECEIVED', 'FULLY_RECEIVED', 'CANCELLED'
+  totalAmount     Float                  @default(0.0)
+  items           PurchaseOrderItem[]
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  recommendations VendorRecommendation[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity        Float
+  cost            Float
+  receivedQty     Float         @default(0.0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([productId])
+  @@index([purchaseOrderId])
+}
+
+model BOM {
+  id          String               @id @default(uuid())
+  productId   String
+  product     Product              @relation("FinishedProduct", fields: [productId], references: [id], onDelete: Cascade)
+  name        String
+  quantity    Float                @default(1.0) // Finished goods yield
+  items       BOMItem[]
+  mfgOrders   ManufacturingOrder[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@index([productId])
+}
+
+model BOMItem {
+  id          String   @id @default(uuid())
+  bomId       String
+  bom         BOM      @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  productId   String // Raw material
+  product     Product  @relation("RawMaterial", fields: [productId], references: [id], onDelete: Cascade)
+  quantity    Float // Raw material quantity needed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([bomId])
+  @@index([productId])
+}
+
+model WorkCenter {
+  id         String      @id @default(uuid())
+  name       String
+  code       String      @unique
+  capacity   Float       @default(1.0)
+  hourlyCost Float       @default(0.0)
+  operations Operation[]
+  workOrders WorkOrder[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+model Operation {
+  id           String      @id @default(uuid())
+  name         String
+  workCenterId String
+  workCenter   WorkCenter  @relation(fields: [workCenterId], references: [id], onDelete: Cascade)
+  setupTime    Float       @default(0.0) // minutes
+  runTime      Float       @default(0.0) // minutes
+  sequence     Int         @default(1)
+  workOrders   WorkOrder[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([workCenterId])
+}
+
+model ManufacturingOrder {
+  id          String      @id @default(uuid())
+  moNumber    String      @unique
+  productId   String
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity    Float
+  status      String      @default("DRAFT") // 'DRAFT', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'
+  bomId       String
+  bom         BOM         @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  startDate   DateTime?
+  endDate     DateTime?
+  workOrders  WorkOrder[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status])
+  @@index([productId])
+  @@index([createdAt])
+}
+
+model WorkOrder {
+  id                   String             @id @default(uuid())
+  moNumber             String
+  manufacturingOrderId String
+  manufacturingOrder   ManufacturingOrder @relation(fields: [manufacturingOrderId], references: [id], onDelete: Cascade)
+  operationId          String
+  operation            Operation          @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  name                 String
+  workCenterId         String
+  workCenter           WorkCenter         @relation(fields: [workCenterId], references: [id], onDelete: Cascade)
+  sequence             Int
+  status               String             @default("PENDING") // 'PENDING', 'IN_PROGRESS', 'COMPLETED'
+  duration             Float              @default(0.0) // minutes
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([status])
+  @@index([manufacturingOrderId])
+}
+
+model StockLedger {
+  id              String   @id @default(uuid())
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  transactionType String   // 'SALES_DELIVERY', 'PURCHASE_RECEIPT', 'MFG_CONSUMPTION', 'MFG_PRODUCTION', 'ADJUSTMENT_ADD', 'ADJUSTMENT_SUB', etc.
+  quantity        Float
+  referenceId     String?  // sales order no, purchase order no, manufacturing order no
+  description     String?
+  userRefId       String?
+  createdAt       DateTime @default(now())
+
+  @@index([productId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  tableName String
+  recordId  String
+  action    String   // 'CREATE', 'UPDATE', 'DELETE'
+  oldValue  Json?
+  newValue  Json?
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  timestamp DateTime @default(now())
+
+  @@index([tableName, recordId])
+  @@index([timestamp])
+}
+
+model InventoryPrediction {
+  id                 String   @id @default(uuid())
+  productId          String
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  calculatedThreshold Float
+  avgDailySales      Float
+  salesVelocity      Float
+  reorderFrequency   Float
+  seasonalDemand     Float
+  predictionDate     DateTime @default(now())
+  createdAt          DateTime @default(now())
+
+  @@index([productId])
+}
+
+model VendorRecommendation {
+  id                 String        @id @default(uuid())
+  purchaseOrderId    String
+  purchaseOrder      PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId          String
+  recommendedVendorId String
+  recommendedVendor  Vendor        @relation(fields: [recommendedVendorId], references: [id], onDelete: Cascade)
+  score              Float
+  explanation        String
+  createdAt          DateTime      @default(now())
+
+  @@index([purchaseOrderId])
+}
